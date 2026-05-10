@@ -1027,6 +1027,17 @@ app.get('/api/announcements', verifyToken, async (req, res) => {
     }
 });
 
+app.delete('/api/announcements/:id', verifyToken, async (req, res) => {
+    if (req.userRole !== 'ADMIN') return res.status(403).json({ message: 'Forbidden' });
+    try {
+        const deleted = await Announcement.findByIdAndDelete(req.params.id);
+        if (!deleted) return res.status(404).json({ message: 'Announcement not found' });
+        res.json({ message: 'Announcement deleted' });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
