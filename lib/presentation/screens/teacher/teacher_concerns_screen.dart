@@ -37,7 +37,8 @@ class _TeacherConcernsScreenState extends State<TeacherConcernsScreen> {
   Future<void> _fetchConcerns() async {
     setState(() => _isLoading = true);
     try {
-      final apiData = await ApiService.getConcerns();
+      // Use the teacher-specific endpoint that filters by teacher name
+      final apiData = await ApiService.get('/teacher/concerns');
 
       // Merge with local data (if any exist)
       final List<dynamic> localData = AppData.teacherNotifs.map((m) => <String, dynamic>{
@@ -51,7 +52,7 @@ class _TeacherConcernsScreenState extends State<TeacherConcernsScreen> {
 
       if (mounted) {
         setState(() {
-          _concerns = [...localData, ...apiData];
+          _concerns = [...localData, ...?apiData];
           _isLoading = false;
         });
       }

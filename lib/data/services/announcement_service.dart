@@ -54,6 +54,15 @@ class AnnouncementService {
     }
   }
 
+  static Future<void> deleteAnnouncement(String announcementId) async {
+    try {
+      await ApiService.delete('/announcements/$announcementId');
+    } catch (e) {
+      print('Error deleting announcement: $e');
+      rethrow;
+    }
+  }
+
   static Stream<List<Map<String, dynamic>>> streamAnnouncements(String section) {
     // Create a periodic stream to simulate live updates since we moved from Firestore
     return Stream.periodic(const Duration(seconds: 15))

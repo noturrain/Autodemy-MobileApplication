@@ -70,6 +70,16 @@ class ApiService {
     throw Exception('POST $endpoint failed: ${response.statusCode}');
   }
 
+  static Future<dynamic> delete(String endpoint) async {
+    final headers = await _getHeaders();
+    final response = await http.delete(Uri.parse('$baseUrl$endpoint'), headers: headers);
+    if (response.statusCode == 200 || response.statusCode == 204) {
+      if (response.body.isNotEmpty) return jsonDecode(response.body);
+      return true;
+    }
+    throw Exception('DELETE $endpoint failed: ${response.statusCode}');
+  }
+
   static Future<Map<String, dynamic>?> login(String username, String password) async {
     try {
       final response = await http.post(

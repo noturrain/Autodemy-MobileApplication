@@ -55,16 +55,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
     super.dispose();
   }
 
-  List<CalendarEvent> _getEventsForDay(DateTime day) {
+  List<Map<String, dynamic>> _getEventsForDay(DateTime day) {
     final normalizedDay = DateTime(day.year, day.month, day.day);
     
     // 1. Get local/manual events
-    final List<CalendarEvent> events = (AppData.calendarEvents[normalizedDay] ?? []).map((e) => CalendarEvent(
-      title: e['title'],
-      time: e['time'],
-      location: e['location'],
-      description: e['description'],
-    )).toList();
+    final List<Map<String, dynamic>> events = (AppData.calendarEvents[normalizedDay] ?? []).map((e) => {
+      'title': e['title'],
+      'time': e['time'],
+      'location': e['location'],
+      'description': e['description'],
+      'isCloud': false,
+      'isAdmin': false,
+      'id': null,
+    }).toList();
 
     // 2. Add cloud announcements for this day
     final cloudEvents = _cloudAnnouncements.where((a) {
@@ -72,12 +75,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
       final dt = (a['dateTime'] is DateTime) ? a['dateTime'] : DateTime.tryParse(a['dateTime'].toString());
       if (dt == null) return false;
       return dt.year == day.year && dt.month == day.month && dt.day == day.day;
-    }).map((a) => CalendarEvent(
-      title: a['title'] ?? 'Announcement',
-      time: a['time'] ?? 'All Day',
-      location: a['location'] ?? 'Campus',
-      description: a['description'] ?? '',
-    ));
+    }).map((a) => {
+      'title': a['title'] ?? 'Announcement',
+      'time': a['time'] ?? 'All Day',
+      'location': a['location'] ?? 'Campus',
+      'description': a['description'] ?? '',
+      'isCloud': true,
+      'isAdmin': a['authorRole'] == 'ADMIN',
+      'id': a['_id'],
+    });
 
     events.addAll(cloudEvents);
     return events;
@@ -109,6 +115,52 @@ class _CalendarScreenState extends State<CalendarScreen> {
     } catch (e) {
       if (mounted) setState(() => _isLoadingCloud = false);
     }
+  }
+
+  Future<bool> _deleteEventAt(DateTime day, int index) async {
+    final events = _getEventsForDay(day);
+    if (index < 0 || index >= events.length) return false;
+
+    final eventData = events[index];
+    final bool isCloud = eventData['isCloud'] ?? false;
+    final String? eventId = eventData['id'];
+
+    if (isCloud && eventId != null) {
+      try {
+        await AnnouncementService.deleteAnnouncement(eventId);
+        if (mounted) {
+          setState(() {
+            _cloudAnnouncements.removeWhere((a) => a['_id'] == eventId || a['id'] == eventId);
+          });
+        }
+        return true;
+      } catch (e) {
+        debugPrint('Error deleting cloud event: $e');
+        return false;
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        final eventsForDay = AppData.calendarEvents[day];
+        if (eventsForDay != null) {
+          if (index < eventsForDay.length) {
+            eventsForDay.removeAt(index);
+          } else {
+            eventsForDay.removeWhere((e) {
+              return e['title'] == eventData['title'] &&
+                     e['time'] == eventData['time'] &&
+                     e['location'] == eventData['location'] &&
+                     e['description'] == eventData['description'];
+            });
+          }
+          if (eventsForDay.isEmpty) {
+            AppData.calendarEvents.remove(day);
+          }
+        }
+      });
+    }
+    return true;
   }
 
   @override
@@ -482,6 +534,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   Widget _buildEventList() {
     final day = DateTime(_selectedDay!.year, _selectedDay!.month, _selectedDay!.day);
+    final localEvents = AppData.calendarEvents[day] ?? [];
     final events = _getEventsForDay(day);
 
     if (events.isEmpty) {
@@ -497,29 +550,48 @@ class _CalendarScreenState extends State<CalendarScreen> {
           children: [
             Icon(Icons.event_busy_rounded, size: 48, color: Colors.grey),
             SizedBox(height: 16),
-            const Text('No events scheduled for this day.', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+            Text('No events scheduled for this day.', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
           ],
         ),
       );
     }
-    
+
     return Column(
       children: List.generate(events.length, (index) {
-        final event = events[index];
+        final eventData = events[index];
+        final CalendarEvent event = CalendarEvent(
+          title: eventData['title'],
+          time: eventData['time'],
+          location: eventData['location'],
+          description: eventData['description'],
+        );
+        final bool isCloud = eventData['isCloud'] ?? false;
+        final String? eventId = eventData['id'];
+
         return GestureDetector(
           onTap: () {
             Navigator.of(context, rootNavigator: true).push(
               MaterialPageRoute(
                 builder: (_) => EventDetailsScreen(
                   event: event,
-                  canEdit: widget.userRole == 'ADMIN' || widget.userRole == 'TEACHER',
+                  canEdit: widget.userRole == 'ADMIN',
+                  canDelete: widget.userRole == 'ADMIN',
+                  isCloud: isCloud,
+                  eventId: eventId,
+                  day: day,
+                  eventIndex: index,
                   onEdit: () {
                     // Logic to edit could go here
                   },
-                  onDelete: () {
-                    setState(() {
-                      AppData.calendarEvents[day]!.removeAt(index);
-                    });
+                  onDelete: () async {
+                    if (widget.userRole != 'ADMIN') return;
+                    final success = await _deleteEventAt(day, index);
+                    if (!success && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Failed to delete event.'),
+                        backgroundColor: Colors.redAccent,
+                      ));
+                    }
                   },
                 ),
               ),
@@ -551,8 +623,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          event.title, 
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary, letterSpacing: -0.5)
+                          event.title,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary, letterSpacing: -0.5),
                         ),
                         const SizedBox(height: 6),
                         Row(
@@ -583,15 +655,25 @@ class _CalendarScreenState extends State<CalendarScreen> {
 class EventDetailsScreen extends StatelessWidget {
   final CalendarEvent event;
   final bool canEdit;
+  final bool canDelete;
+  final bool isCloud;
+  final String? eventId;
+  final DateTime? day;
+  final int? eventIndex;
   final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final Future Function()? onDelete;
 
   const EventDetailsScreen({
     super.key, 
     required this.event, 
-    this.canEdit = false, 
+    this.canEdit = false,
+    this.canDelete = false,
+    this.isCloud = false,
+    this.eventId,
+    this.day,
+    this.eventIndex,
     required this.onEdit, 
-    required this.onDelete
+    this.onDelete
   });
 
   @override
@@ -604,14 +686,7 @@ class EventDetailsScreen extends StatelessWidget {
         foregroundColor: AppTheme.textPrimary,
         elevation: 0,
         actions: [
-          if (canEdit) ...[
-            IconButton(
-              icon: const Icon(Icons.edit_note_rounded, color: AppTheme.primary),
-              onPressed: () {
-                Navigator.pop(context);
-                onEdit();
-              },
-            ),
+          if (canDelete) ...[
             IconButton(
               icon: const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent),
               onPressed: () {
@@ -708,8 +783,14 @@ class EventDetailsScreen extends StatelessWidget {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CANCEL')),
           TextButton(
-            onPressed: () {
-              onDelete();
+            onPressed: () async {
+              if (onDelete != null) {
+                try {
+                  await onDelete!();
+                } catch (e) {
+                  debugPrint('Error deleting event: $e');
+                }
+              }
               Navigator.pop(ctx);
               Navigator.pop(context);
             }, 

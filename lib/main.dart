@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
@@ -48,12 +49,14 @@ void main() async {
     }
   }
   
-  // Initialize Firebase in the background
-  Firebase.initializeApp().then((_) {
+  // Initialize Firebase
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     debugPrint("AUTODEMY: Firebase initialized successfully.");
-  }).catchError((e) {
-    debugPrint("AUTODEMY: Firebase initialization error: $e");
-  });
+  } catch (e) {
+    debugPrint("AUTODEMY: Firebase initialization failed: $e");
+    // For unsupported platforms like Linux, continue without Firebase
+  }
 
   runApp(GlobalNotificationListener(child: const AutodemyApp()));
 }
